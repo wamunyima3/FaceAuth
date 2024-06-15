@@ -7,36 +7,66 @@ $error_message = '';
 // Check if form is submitted
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Get form data
-    $email = $_POST['email'];
-    $password = $_POST['password'];
     $user_type = $_POST['user-type'];
+    $email = isset($_POST['email']) ? $_POST['email'] : '';
+    $password = isset($_POST['password']) ? $_POST['password'] : '';
+    $face_encoding = isset($_POST['face_encoding']) ? $_POST['face_encoding'] : '';
 
-    if ($user_type ==='Admin' && empty($email) || empty($password)) {
+    if ($user_type === 'Admin' && (empty($email) || empty($password))) {
         $error_message = "Please fill in all required fields.";
+    } elseif ($user_type === 'Lecturer' && empty($face_encoding)) {
+        $error_message = "Please capture your face to login.";
     } else {
         $error_message = "";
-        // Prepare a query to check user credentials
-        $sql = "SELECT * FROM users WHERE email = :email AND password = :password AND user_type = :user_type";
-        $stmt = $conn->prepare($sql);
-        $stmt->bindParam(':email', $email);
-        $stmt->bindParam(':password', $password);
-        $stmt->bindParam(':user_type', $user_type);
+        if ($user_type === 'Admin') {
+            // Prepare a query to check admin credentials
+            $sql = "SELECT * FROM users WHERE email = :email AND password = :password AND user_type = :user_type";
+            $stmt = $conn->prepare($sql);
+            $stmt->bindParam(':email', $email);
+            $stmt->bindParam(':password', $password);
+            $stmt->bindParam(':user_type', $user_type);
+        } else {
+            // Prepare a query to check lecturer face encoding
+            $sql = "SELECT * FROM users WHERE user_type = :user_type";
+            $stmt = $conn->prepare($sql);
+            $stmt->bindParam(':user_type', $user_type);
+        }
         $stmt->execute();
 
         // Check if login is successful
-        if ($stmt->rowCount() > 0) {
-            // Login successful, handle it (e.g., redirect to a secure page)
+        if ($user_type === 'Admin' && $stmt->rowCount() > 0) {
+            session_start();
+            $_SESSION['admin_email'] = $email;
             echo "Login successful!";
-            // Example: Redirect to a welcome page
-            if($user_type ==='Admin'){
-                header("Location: admin_dashboard.php");
-            }else{
-                header("Location: lecturer_dashboard.php");
-            }    
+            header("Location: admin_dashboard.php");
             exit;
+        } elseif ($user_type === 'Lecturer') {
+            $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $found_match = false;
+            foreach ($users as $user) {
+                $stored_face_encoding = json_decode($user['face_encoding'], true);
+                $current_face_encoding = json_decode($face_encoding, true);
+
+                if (count($stored_face_encoding) === count($current_face_encoding)) {
+                    $distance = 0.0;
+                    for ($i = 0; $i < count($stored_face_encoding); $i++) {
+                        $distance += pow($stored_face_encoding[$i] - $current_face_encoding[$i], 2);
+                    }
+                    $distance = sqrt($distance);
+
+                    // Use a threshold value to determine a match
+                    if ($distance < 0.6) {
+                        session_start();
+                        $_SESSION['lecturer_id'] = $user['id'];
+                        echo "Login successful!";
+                        header("Location: lecturer_dashboard.php");
+                        exit;
+                    }
+                }
+            }
+            $error_message = "Invalid face credentials!";
         } else {
-            // Login failed, handle it (e.g., display an error message)
-            $error_message = "Invalid email, password, or user type!";
+            $error_message = "Invalid login credentials!";
         }
     }
 }
@@ -44,7 +74,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -54,17 +83,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <script>
         function handleUserTypeChange() {
             var userType = document.getElementById('user-type').value;
-            var emailInput = document.getElementById('email');
-            var passwordInput = document.getElementById('password');
+            var emailField = document.getElementById('emailField');
+            var passwordField = document.getElementById('passwordField');
             var faceLoginDiv = document.getElementById('face-login');
 
             if (userType === 'Lecturer') {
-                emailInput.style.display = 'none';
-                passwordInput.style.display = 'none';
+                emailField.style.display = 'none';
+                passwordField.style.display = 'none';
                 faceLoginDiv.style.display = 'block';
             } else {
-                emailInput.style.display = 'block';
-                passwordInput.style.display = 'block';
+                emailField.style.display = 'block';
+                passwordField.style.display = 'block';
                 faceLoginDiv.style.display = 'none';
             }
         }
@@ -107,7 +136,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     </script>
 </head>
-
 <body>
     <div class="h-screen w-screen flex flex-col justify-center items-center bg-gray-100">
         <div class="w-full max-w-sm bg-white p-6 rounded-lg shadow-md">
@@ -141,17 +169,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     <p class="text-sm text-gray-700">Lecturers should use face login.</p>
                     <video id="video" width="320" height="240" autoplay muted class="rounded-md border border-gray-300"></video>
                     <input type="hidden" id="face_encoding" name="face_encoding" required>
-                    <button type="button" onclick="captureFace()" class="mt-2 inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Capture Face</button>
-                </div>
-                <div class="flex justify-center">
-                    <button type="submit"
-                        class="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                        Login
+                    <button type="button" onclick="captureFace()" class="mt-2 inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        Capture Face
                     </button>
                 </div>
+                <button type="submit"
+                    class="w-full px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Login</button>
             </form>
         </div>
     </div>
 </body>
-
 </html>

@@ -9,3 +9,5 @@ CREATE TABLE users (
 
 
 insert into users(name,email,password,user_type) values('Wamunyima Mukelabai', 'test@gmail.com','1234', 'Admin');
+
+DELETE FROM users WHERE email = 'jm@gmail.com';
